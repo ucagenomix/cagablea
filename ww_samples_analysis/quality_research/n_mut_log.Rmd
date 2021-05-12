@@ -1,0 +1,280 @@
+---
+title: "Define quality threshold"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r}
+library(DBI)
+library(RMySQL)
+library(tidyverse)
+library(rlist)
+con <- DBI::dbConnect(RMySQL::MySQL(), 
+                      host = "localhost",
+                      user = "root",
+                      dbname = "cagablea",
+                      password = "")
+```
+
+## A list of all the requests calling samples:
+The function below generates a list with the requests to download the samples 
+Treshholds is a variable, where the cutoff on coverage, p.val, alt_freq and others can be added:
+```{r}
+samples <- function(treshholds){
+  samples <- list()
+  req <- "SELECT * FROM `ww_ivar`,`ww_barcode_decode` WHERE ww_barcode_decode.barcode = ww_ivar.filename" 
+  samples$oct <- "AND ww_ivar.filename LIKE BINARY '%210224%'" 
+  samples$nov <- "AND ww_ivar.filename LIKE BINARY '%20201120%'"
+  samples$dec <- "AND ww_ivar.filename LIKE BINARY '%20201223%'"
+  samples$jan <- "AND ww_ivar.filename LIKE BINARY '%210127%'"
+  samples$fev <- "AND ww_ivar.filename LIKE BINARY '%20210302%'"
+  samples$mar <-  "AND ww_ivar.filename LIKE BINARY '%210325%'"
+  samples <- lapply(samples, function(x) paste(req, treshholds, x, " "))
+  return(samples)
+}
+treshholds <- "AND ww_ivar.total_dp > 10 AND ww_ivar.pval < 0.05 AND ww_ivar.alt_freq > 0.03"
+samples1 <- samples(treshholds)
+
+```
+Count mutations not associated to any lineage and the mutations described for at least one lineage:
+TRUE correspons to the mutations that are not described for any lineages
+```{r}
+no_lineage <- function(d_request){
+  feb <- dbGetQuery(con, d_request)
+  feb <- feb[,-1]
+  feb <- distinct(feb, pos, alt, .keep_all = F)
+  #how many mutations are not associated with any lineage?
+  pango <- dbGetQuery(con, "SELECT * FROM `pango_lineages`")
+  all.mut.id <-  feb %>% left_join(pango, by = c("pos"="pos", "alt"="alt"), keep = T )
+  all.mut.id <- all.mut.id %>% select(pos.x, ref, alt.x, lineage )%>% distinct(pos.x, alt.x, ref, .keep_all = T) 
+  #all.mut.id
+  all.mut.id %>% count(is.na(lineage))
+   
+}
+#no_lineage(samples1$mar)#test
+#Positions with nonsynonymous mutations in spike region not associated with lineages (top 2000 from covidcg)
+  #lin_na %>% filter (ref_aa != alt_aa) %>% filter(pos.x >= 21563) %>% filter(pos.x <= 25384) 
+n_mut <- function(samples){
+  n_id_mutations <- lapply(samples, no_lineage)
+  #n_id_mutations #the number of id and unidentified mut, min number of reads 10
+  n_mut <- cbind(n_id_mutations$oct, n_id_mutations$nov$n, n_id_mutations$dec$n, n_id_mutations$jan$n, n_id_mutations$fev$n, n_id_mutations$mar$n)
+  names(n_mut) <- c("lin_not_id", "oct", "nov", "dec", "jan", "fev", "mar")
+  n_mut
+}  
+```
+total_dp > 10 AND ww_ivar.pval < 0.05 AND ww_ivar.alt_freq > 0.03
+```{r}
+treshholds <- "AND ww_ivar.total_dp > 10 AND ww_ivar.pval < 0.05 AND ww_ivar.alt_freq > 0.03"
+samples1 <- samples(treshholds)
+n_mut(samples1)
+
+```
+Minimum number of reads 100, alt_freq 0.1, pval<0.01:
+```{r}
+treshholds <- "AND ww_ivar.total_dp > 100 AND ww_ivar.pval < 0.01 AND ww_ivar.alt_freq > 0.1"
+samples1 <- samples(treshholds)
+n_mut(samples1)
+
+```
+Minimum number of reads 100, alt_freq 0.3, pval<0.01:
+```{r}
+treshholds <- "AND ww_ivar.total_dp > 100 AND ww_ivar.pval < 0.01 AND ww_ivar.alt_freq > 0.3"
+samples1 <- samples(treshholds)
+n_mut(samples1)
+
+```
+```{r}
+treshholds <- "AND ww_ivar.total_dp > 100 AND ww_ivar.pval < 0.01 AND ww_ivar.alt_freq > 0.5"
+samples1 <- samples(treshholds)
+n_mut(samples1)
+
+```
+```{r}
+treshholds <- "AND ww_ivar.total_dp > 100 AND ww_ivar.pval < 0.01 AND ww_ivar.alt_freq > 0.7"
+samples1 <- samples(treshholds)
+n_mut(samples1)
+
+```
+Loop through requests with different p-value, total_dp > 100 and alt_freq > 0.1
+Create a list with the sequence of p-values to test:
+```{r}
+treshholds_p_list <- list()
+q <- "AND ww_ivar.total_dp > 100 AND ww_ivar.alt_freq > 0.1 AND ww_ivar.pval < "
+p_values <- c(10 %o% 10^(-3:-16))
+i = 1
+for (i in 1:length(p_values)){
+  treshholds_p_list <- list.append(treshholds_p_list, paste(q, p_values[i]) )
+  i = i +1
+}
+
+```
+Create a serie of requests with different p-values for every month:
+```{r}
+samples1 <- samples(treshholds_p_list) 
+```
+n_mut_pval has 14 dataframes, that correspond to p-values in p_values vector 
+1e-02 1e-03 1e-04 1e-05 1e-06 1e-07 1e-08 1e-09 1e-10 1e-11 1e-12 1e-13 1e-14 1e-15
+```{r}
+i = 1
+n_mut_pval <- list()
+for (i in 1:length(samples1[[1]])){
+  n_mut_pval <- list.append(n_mut_pval, n_mut(lapply(samples1, `[[`, i)))
+  i = i + 1
+}
+
+```
+
+Build a function to plot the number of mutatios against log10(p-value):
+
+```{r}
+plot_mut_pval <- function (month){
+pval_nmut <- rbind(n_mut_pval[[1]][,month], n_mut_pval[[2]][,month])
+
+for (i in 3:length(n_mut_pval)) {
+  pval_nmut <- rbind(pval_nmut, n_mut_pval[[i]][,month] )
+  pval_nmut
+  i = i +1
+}
+pval_nmut<- as.data.frame(cbind(pval_nmut, p_values))
+names(pval_nmut) <- c("identified", "not_id", "p_values")
+print(pval_nmut)
+ggplot(pval_nmut)+
+  geom_point(aes(y = identified, x = log10(p_values), col = "red"))+
+  geom_point(aes(y = not_id, x = log10(p_values), col = "blue"))+
+  scale_y_continuous(name="Number of mutations")+
+  theme(legend.position="none")
+  
+#plot(y = pval_nmut$identified, x = log10(pval_nmut$p_values))
+#plot(y = pval_nmut$not_id, x = log10(pval_nmut$p_values)) 
+}
+
+```
+
+## plot the number of mutatios against log10(p-value)
+plot for october:
+```{r}
+month = "oct"
+plot_mut_pval(month)
+```
+
+plot for november:
+```{r}
+month = "nov"
+plot_mut_pval(month)
+```
+
+plot for december:
+```{r}
+month = "dec"
+plot_mut_pval(month)
+```
+
+plot for january:
+```{r}
+month = "jan"
+plot_mut_pval(month)
+```
+
+plot for february:
+```{r}
+month = "fev"
+plot_mut_pval(month)
+```
+
+plot for march:
+```{r}
+month = "mar"
+plot_mut_pval(month)
+```
+
+## Frequency values
+
+Fix p-value 0.01, total_dp > 100. Create a serie of requests with alt_freq:
+```{r}
+treshholds_fr_list <- list()
+q <- "AND ww_ivar.total_dp > 100  AND ww_ivar.pval < 0.01 AND ww_ivar.alt_freq > "
+fr_values <- seq(0.03, 0.5, by = 0.025 )
+i = 1
+for (i in 1:length(fr_values)){
+  treshholds_fr_list <- list.append(treshholds_fr_list, paste(q, fr_values[i]) )
+  i = i +1
+}
+
+```
+
+Create a serie of requests with different frequency values for every month:
+```{r}
+samples2 <- samples(treshholds_fr_list) 
+#samples2
+```
+n_mut_pval has 19 dataframes, that correspond to p-values in p_values vector 
+1e-02 1e-03 1e-04 1e-05 1e-06 1e-07 1e-08 1e-09 1e-10 1e-11 1e-12 1e-13 1e-14 1e-15
+this chunk takes long to be executed
+```{r}
+i = 1
+n_mut_frval <- list()
+for (i in 1:length(samples2[[1]])){
+  n_mut_frval <- list.append(n_mut_frval, n_mut(lapply(samples2, `[[`, i)))
+  i = i + 1
+}
+
+```
+Build a function to plot the number of mutatios against frequecies:
+
+```{r}
+plot_mut_freq <- function (month){
+nmut <- rbind(n_mut_frval[[1]][,month], n_mut_frval[[2]][,month])
+
+for (i in 3:length(n_mut_frval)) {
+  nmut <- rbind(nmut, n_mut_frval[[i]][,month] )
+  nmut
+  i = i +1
+}
+nmut<- as.data.frame(cbind(nmut, fr_values))
+names(nmut) <- c("identified", "not_id", "frequencies")
+print(nmut)
+ggplot(nmut)+
+  geom_point(aes(y = log10(identified), x = frequencies, col = "red"))+
+  geom_point(aes(y = log10(not_id), x = frequencies, col = "blue"))+
+  scale_y_continuous(name="Number of mutations(log10)")+
+  theme(legend.position="none")
+  
+#plot(y = pval_nmut$identified, x = log10(pval_nmut$p_values))
+#plot(y = pval_nmut$not_id, x = log10(pval_nmut$p_values)) 
+}
+
+```
+
+plot the number of mutations in october agains diff. frequencies:
+Red color = Not identified mut
+Blue color = Identified
+```{r}
+plot_mut_freq(month = "oct")
+```
+
+November:
+```{r}
+plot_mut_freq(month = "nov")
+```
+
+December:
+```{r}
+plot_mut_freq(month = "dec")
+```
+
+January:
+```{r}
+plot_mut_freq(month = "jan")
+```
+
+February:
+```{r}
+plot_mut_freq(month = "fev")
+```
+
+March:
+```{r}
+plot_mut_freq(month = "mar")
+```
