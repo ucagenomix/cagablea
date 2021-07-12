@@ -11,7 +11,9 @@ Findings: We initially detected the lineages predominant in Europe at the end of
 Interpretation: Wastewater sequencing allowed to document the diversity of SARS-CoV-2 sequences within the different neighborhoods of the city of Nice. Our results illustrate how sequencing of sewage samples can be used to track pathogen sequence diversity in the current pandemics and in future infectious disease outbreaks.
 
 
-The project contains the following folders:
+The project details the bioinformatic approaches used in this study. 
+
+It contains the following folders:
 
 data_base: contains the files needed to build a database.
 ----------------------------------------------------------
