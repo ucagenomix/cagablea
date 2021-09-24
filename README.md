@@ -1,6 +1,6 @@
 # cagablea
 Monitoring SARS-CoV-2 variants alterations in Nice neighborhoods by wastewater nanopore sequencing
-https://www.medrxiv.org/content/10.1101/2021.07.09.21257475v1
+https://www.sciencedirect.com/science/article/pii/S2666776221001794
 
 Background: Wastewater surveillance was proposed as an epidemiological tool to define the prevalence and evolution of the SARS-CoV-2 epidemics. However, most implemented SARS-CoV-2 wastewater surveillance projects was based on qPCR measurement of virus titers and did not address the mutational spectrum of SARS-CoV-2 circulating in the population. 
 
